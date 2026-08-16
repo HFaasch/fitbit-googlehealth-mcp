@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { z } from 'zod';
 import { AuthHandler } from './auth/handler';
+import { DAILY_METRICS, getDailyMetricRange } from './providers/google-health/metrics';
 import { refreshAccessToken } from './providers/google-health/oauth';
 import { getSleepRange } from './providers/google-health/sleep';
 import type { Env, Props } from './types';
@@ -51,6 +52,32 @@ function buildServer(accessToken: string): McpServer {
     async ({ from, to }) => {
       try {
         const result = await getSleepRange(`${from}T00:00:00Z`, `${to}T00:00:00Z`, accessToken);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+      } catch (error) {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'get_daily_metrics',
+    'Get a daily health metric over a date range: respiratory rate, SpO2, resting heart rate, heart rate variability, or skin temperature deviation.',
+    {
+      metric: z.enum(Object.keys(DAILY_METRICS) as [string, ...string[]]).describe('Which metric to fetch'),
+      from: z.string().describe('Start date (YYYY-MM-DD, inclusive)'),
+      to: z.string().describe('End date (YYYY-MM-DD, exclusive)'),
+    },
+    async ({ metric, from, to }) => {
+      try {
+        const result = await getDailyMetricRange(
+          metric as keyof typeof DAILY_METRICS,
+          from,
+          to,
+          accessToken,
+        );
         return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
       } catch (error) {
         return {

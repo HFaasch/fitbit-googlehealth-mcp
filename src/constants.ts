@@ -5,6 +5,7 @@ export const HEALTH_API_BASE = 'https://health.googleapis.com/v4';
 // https://developers.google.com/health/scopes
 export const GOOGLE_HEALTH_SCOPES = [
   'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
+  'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
   'openid',
   'email',
 ] as const;
