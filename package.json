@@ -1,17 +1,13 @@
 {
-  "name": "fitbit-googlehealth-mcp",
+  "name": "google-health-mcp",
   "version": "0.1.0",
-  "description": "MCP server for Fitbit (and the upcoming Google Health API migration): comprehensive health-data access and photo-driven food logging for Claude mobile.",
+  "description": "MCP server for the Google Health API (sleep data), deployed as a remote OAuth-protected Cloudflare Worker usable from Claude and ChatGPT.",
   "private": true,
   "type": "module",
   "license": "MIT",
-  "author": "Yuto Tachibana",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "setup:fitbit": "tsx scripts/setup-fitbit.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write ."
@@ -20,6 +16,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@hono/mcp": "^0.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "hono": "^4.7.0",
@@ -27,11 +24,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2",
-    "@cloudflare/workers-types": "^4.20260421.1",
+    "@cloudflare/workers-types": "^5",
     "@types/node": "^22",
-    "tsx": "^4",
     "typescript": "^5.7",
-    "vitest": "^2",
     "wrangler": "^4"
   }
 }
