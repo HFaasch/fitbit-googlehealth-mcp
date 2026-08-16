@@ -26,7 +26,7 @@ export async function listDataPoints<T>(
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Google Health API ${response.status} at ${dataType}: ${body.slice(0, 300)}`);
+    throw new Error(`Google Health API ${response.status} at ${dataType}: ${body.slice(0, 500)}`);
   }
 
   return (await response.json()) as DataPointsPage<T>;
