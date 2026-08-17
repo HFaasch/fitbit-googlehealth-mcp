@@ -18,6 +18,10 @@ export const DAILY_METRICS = {
     dataType: 'daily-sleep-temperature-derivations',
     filterName: 'daily_sleep_temperature_derivations',
   },
+  heart_rate_zones: {
+    dataType: 'daily-heart-rate-zones',
+    filterName: 'daily_heart_rate_zones',
+  },
 } as const;
 
 export type DailyMetricKey = keyof typeof DAILY_METRICS;
