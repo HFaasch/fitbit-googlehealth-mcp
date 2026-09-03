@@ -97,18 +97,11 @@ npm install
 npx wrangler kv namespace create OAUTH_KV
 ```
 
-Create `wrangler.toml` (git-ignored — each fork has its own IDs) from this template and
-paste in the namespace `id` the command printed:
+Create your `wrangler.toml` from the template and paste in the namespace `id` the command
+printed (`wrangler.toml` is git-ignored — each fork has its own id):
 
-```toml
-name = "google-health-mcp"
-main = "src/worker.ts"
-compatibility_date = "2026-01-01"
-compatibility_flags = ["nodejs_compat"]
-
-[[kv_namespaces]]
-binding = "OAUTH_KV"
-id = "<your-kv-namespace-id>"
+```bash
+cp wrangler.toml.example wrangler.toml
 ```
 
 Set the secrets:

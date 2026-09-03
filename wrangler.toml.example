@@ -1,0 +1,19 @@
+# Copy to wrangler.toml and fill in your own values.
+# wrangler.toml is git-ignored: each fork has its own KV namespace id.
+
+name = "google-health-mcp"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace for OAuth state + the Google refresh token.
+# Create it with:  npx wrangler kv namespace create OAUTH_KV
+# then paste the printed id below.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "<your-kv-namespace-id>"
+
+# Secrets are NOT set here. Set them with wrangler:
+#   npx wrangler secret put GOOGLE_CLIENT_ID
+#   npx wrangler secret put GOOGLE_CLIENT_SECRET
+#   npx wrangler secret put PRIVACY_CONTACT   # optional: shown on /privacy
