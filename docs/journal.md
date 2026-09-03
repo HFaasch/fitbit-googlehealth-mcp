@@ -415,3 +415,56 @@ Fitbit モバイルを経由せず、直接 API を叩いて栄養素フィー�
 - 移行着手の最適タイミングは GH API 安定後の **~2026-08**(続ける場合)。`HealthProvider` 抽象と Pattern B が正しかったので like-for-like の段階移行で済む見込み
 - 移行のユーザー実益としてはっきりしているのは食事ログ書き込みのクリーン化のみ。read 主体なら移行はほぼ強制メンテ、という整理
 - 今回は docs(research.md + journal.md)更新のみコミット
+
+---
+
+## 2026-09-03 / ChatGPT で connector が自動無効化 → 診断と 2 バグ修正
+
+ChatGPT 側で Google Health connector が「The Google_Health_MCP tool has been disabled」で自動停止した、という報告から。GH API 移行(`f6bbf89` で Fitbit Web API → Google Health API v4 + 実 OAuth に置換)後、初めての実運用フィードバック。
+
+### 切り分け
+
+- デプロイ済み Worker を外から叩いて層ごとに確認: `/`(200)、OAuth discovery(RFC 8414 / 9728 valid)、`/mcp` 無トークン(401 + 正しい `WWW-Authenticate`)。トランスポートと OAuth gate は健全
+- `wrangler secret list` で `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` 存在、`OAUTH_KV` バインド OK
+- `claude mcp list`: connector は登録済みだが `Needs authentication`
+
+### 効いた気づき
+
+1. **`McpApiHandler.fetch` は `tools/list` の前に `refreshAccessToken()` を無条件で走らせる**。Google refresh が失敗すると tool 一覧の取得すら 401 → ChatGPT は connector 全体を壊れ判定して無効化する。症状「tool has been disabled」の直接原因はここ
+2. **一番あり得る refresh 失敗は Testing モードの 7 日失効**(`research.md` D 節に既記)。OAuth 同意画面を "In production" に publish するまで無人 refresh は 7 日で壊れる。前回デプロイ 08-17、今回 09-03 でとうに超過
+3. **publish できない理由はプライバシー URL 不在**。sensitive scope で production に上げるにはアプリのプライバシーポリシー URL が必須で、Worker はそれを配信していなかった
+
+### やったこと
+
+**(A) `/privacy` ルート追加**([auth/handler.ts](../src/auth/handler.ts))
+
+同意画面を publish できるようにするため、Worker が単一利用者向けのプライバシーポリシー(read-only、第三者共有なし、KV に保存するのは refresh token のみ、Google API Services User Data Policy の Limited Use 準拠文)を `GET /privacy` で配信。ランディングからもリンク。→ 同意画面 Branding に home page + privacy URL を入れて production 化できる状態に。
+
+**(B) Claude Code 側 connector で実データ疎通確認**
+
+`/mcp` から再認可(Testing モードなので 7 日有効の新トークン)。全 tool ファミリで Google Health API から実データ取得を確認: `get_sleep`(stages/summary)、`get_daily_metrics`(resting HR / HRV / SpO2 / skin temp = `daily-sleep-temperature-derivations`、絶対 ℃)、`get_weight_range`(Health Connect 経由の外部アプリ)。複数のデータソースも透過して返る。
+
+**(C) バグ 2 件修正**
+
+| バグ | 原因 | 修正 |
+|---|---|---|
+| `get_sleep_range` が 7 日で 69,560 字 → MCP クライアントのトークン上限超過でファイル退避(ChatGPT でも詰まる) | 生 datapoint(全 stage 遷移 + 全 micro-awakening)を `JSON.stringify(…, null, 2)` でそのまま返却。~10 KB/夜 | `summarizeSleepPoint()`([sleep.ts](../src/providers/google-health/sleep.ts)): 夜ごとに日付/滞在時間/効率 %/stage 分/覚醒回数だけのサマリに圧縮。7 日で ~3 KB。1 夜の stage 詳細は従来どおり `get_sleep` |
+| `get_heart_rate` が `sampleCount: 2000` 固定・22〜23 時のみを返し、min/max/avg を全日値として提示 | `dataPoints.list` の AIP デフォルト pageSize=50(未指定時)+ 40 ページ cap で、~2.5 秒サンプリングの HR が 1 日の末尾 2 時間で打ち止め | [client.ts](../src/providers/google-health/client.ts) に `pageSize`(既定 1000 = GH API の最大)を明示追加。`listAllDataPointsPaged` / `getSampleRangePaged` で truncation を通知。[heart-rate.ts](../src/providers/google-health/heart-rate.ts) は pageSize 1000 × 45 ページに。取得は 1 日分フル(以前は末尾約 2 時間で打ち止め、min/max/avg が全日値として誤提示されていた)。上限超過時のみ `partialCoverage: true` |
+
+`pageSize` 明示は `get_weight_range` / `get_body_fat_range` / `get_daily_metrics` にも波及(長期間レンジの取りこぼし防止)。
+
+### 検証
+
+- `tsc --noEmit` green
+- デプロイ後、Claude Code connector 経由で `get_sleep_range`(7 日 → 7 サマリ ~3 KB)と `get_heart_rate`(24 時間フル)を再取得して確認
+- `npm run lint`(Biome)は repo 全体で赤だが、これは本変更前から(HEAD の全ファイルで `×`)。CRLF と既存フォーマット由来。既存スタイルに追従し、`npm run format` は別コミット扱いとする
+
+### 残タスク(ユーザー側)
+
+1. Google 同意画面に home page + `…/privacy` を登録 → **App を publish(In production)** で 7 日失効を解消
+2. ChatGPT で connector を一度削除 → 再追加(Google consent やり直し)
+
+### メモ
+
+- `get_sleep` / `get_heart_rate` の `date` は **UTC 暦日**として解釈される。UTC 以外のタイムゾーンの利用者では「その朝に終わった夜」を指すことになる。`get_sleep_range` のサマリは `interval.end_time + endUtcOffset` からローカル日付を出している
+- Tool count 変化なし(6 tool のまま、挙動のみ修正)

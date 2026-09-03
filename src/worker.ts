@@ -17,7 +17,7 @@ import { getHeartRateSummary } from './providers/google-health/heart-rate';
 import { DAILY_METRICS, getDailyMetricRange } from './providers/google-health/metrics';
 import { refreshAccessToken } from './providers/google-health/oauth';
 import { getSampleRange } from './providers/google-health/samples';
-import { getSleepRange } from './providers/google-health/sleep';
+import { getSleepRange, summarizeSleepPoint } from './providers/google-health/sleep';
 import type { Env, Props } from './types';
 
 export { Env, Props };
@@ -46,7 +46,7 @@ function buildServer(accessToken: string): McpServer {
 
   server.tool(
     'get_sleep_range',
-    'Get sleep data for a date range (UTC). Automatically paginates (Google caps sleep pages at 25 entries).',
+    'Get a compact per-night sleep summary for a date range (UTC): duration, efficiency, stage minutes, and awakening count per night. For the full stage-by-stage breakdown of one night, use get_sleep.',
     {
       from: z.string().describe('Start date (YYYY-MM-DD, UTC, inclusive)'),
       to: z.string().describe('End date (YYYY-MM-DD, UTC, exclusive)'),
@@ -54,7 +54,8 @@ function buildServer(accessToken: string): McpServer {
     async ({ from, to }) => {
       try {
         const result = await getSleepRange(`${from}T00:00:00Z`, `${to}T00:00:00Z`, accessToken);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const summaries = result.map(summarizeSleepPoint);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(summaries, null, 2) }] };
       } catch (error) {
         return {
           content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }],

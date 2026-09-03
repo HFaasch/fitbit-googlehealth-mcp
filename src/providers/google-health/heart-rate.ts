@@ -1,4 +1,4 @@
-import { getSampleRange } from './samples';
+import { getSampleRangePaged } from './samples';
 
 interface RawHeartRatePoint {
   dataSource?: { device?: { displayName?: string }; platform?: string };
@@ -24,6 +24,8 @@ export interface HeartRateSummary {
   maxBpm: number;
   avgBpm: number;
   hourly: HourlyBucket[];
+  /** Present and true only when the day had more samples than the fetch cap, so this summary covers only part of the day. */
+  partialCoverage?: boolean;
 }
 
 /**
@@ -39,13 +41,17 @@ export async function getHeartRateSummary(
   const start = `${date}T00:00:00Z`;
   const end = new Date(new Date(start).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-  const points = await getSampleRange<RawHeartRatePoint>(
+  // Continuous HR runs ~1-2k samples/hour, so a full day is up to ~40k points.
+  // pageSize 1000 x 45 pages = 45k ceiling keeps a normal day within one fetch
+  // budget; `truncated` tells us if even that was not enough.
+  const { dataPoints: points, truncated } = await getSampleRangePaged<RawHeartRatePoint>(
     'heart-rate',
     'heart_rate',
     start,
     end,
     accessToken,
-    40,
+    45,
+    1000,
   );
 
   const buckets = new Map<number, number[]>();
@@ -82,5 +88,6 @@ export async function getHeartRateSummary(
     maxBpm: allBpm.length ? Math.max(...allBpm) : 0,
     avgBpm: allBpm.length ? Math.round(allBpm.reduce((sum, v) => sum + v, 0) / allBpm.length) : 0,
     hourly,
+    ...(truncated ? { partialCoverage: true } : {}),
   };
 }
