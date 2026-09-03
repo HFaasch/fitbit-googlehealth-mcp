@@ -2,6 +2,9 @@
 
 実装を進める中で「なぜその選択をしたか」「何にハマったか」「使ってみてどうだったか」を時系列で残す。note 記事化の一次ソース。
 
+> 2026-09 以降のエントリは英語(public fork のため)。それ以前のエントリは元の日本語のまま。
+> Entries from 2026-09 onward are written in English (this is now a public fork). Earlier entries are kept in their original Japanese.
+
 ---
 
 ## 2026-04-22 / プロジェクト開始
@@ -418,53 +421,54 @@ Fitbit モバイルを経由せず、直接 API を叩いて栄養素フィー�
 
 ---
 
-## 2026-09-03 / ChatGPT で connector が自動無効化 → 診断と 2 バグ修正
+## 2026-09-03 / ChatGPT auto-disabled the connector — diagnosis, two bug fixes, going to production
 
-ChatGPT 側で Google Health connector が「The Google_Health_MCP tool has been disabled」で自動停止した、という報告から。GH API 移行(`f6bbf89` で Fitbit Web API → Google Health API v4 + 実 OAuth に置換)後、初めての実運用フィードバック。
+First real-world feedback after the Google Health API migration (`f6bbf89`: Fitbit Web API → Google Health API v4 + real OAuth). ChatGPT reported "The Google_Health_MCP tool has been disabled" and stopped calling it.
 
-### 切り分け
+### Triage
 
-- デプロイ済み Worker を外から叩いて層ごとに確認: `/`(200)、OAuth discovery(RFC 8414 / 9728 valid)、`/mcp` 無トークン(401 + 正しい `WWW-Authenticate`)。トランスポートと OAuth gate は健全
-- `wrangler secret list` で `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` 存在、`OAUTH_KV` バインド OK
-- `claude mcp list`: connector は登録済みだが `Needs authentication`
+- Probed the deployed Worker layer by layer: `/` (200), OAuth discovery (RFC 8414 / 9728 valid), `/mcp` with no token (401 + correct `WWW-Authenticate`). Transport and OAuth gate are healthy.
+- `wrangler secret list`: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` present, `OAUTH_KV` bound.
+- `claude mcp list`: connector registered but `Needs authentication`.
 
-### 効いた気づき
+### Root cause
 
-1. **`McpApiHandler.fetch` は `tools/list` の前に `refreshAccessToken()` を無条件で走らせる**。Google refresh が失敗すると tool 一覧の取得すら 401 → ChatGPT は connector 全体を壊れ判定して無効化する。症状「tool has been disabled」の直接原因はここ
-2. **一番あり得る refresh 失敗は Testing モードの 7 日失効**(`research.md` D 節に既記)。OAuth 同意画面を "In production" に publish するまで無人 refresh は 7 日で壊れる。前回デプロイ 08-17、今回 09-03 でとうに超過
-3. **publish できない理由はプライバシー URL 不在**。sensitive scope で production に上げるにはアプリのプライバシーポリシー URL が必須で、Worker はそれを配信していなかった
+1. **`McpApiHandler.fetch` runs `refreshAccessToken()` unconditionally before `tools/list`.** If the Google refresh fails, even listing tools 401s → ChatGPT marks the whole connector broken and disables it. That is the direct cause of "tool has been disabled".
+2. **The refresh failed because the OAuth consent screen was still in "Testing"**, where refresh tokens expire after 7 days (already noted in `research.md` section D). Last deploy 08-17, now 09-03 — well past 7 days, so the stored token was dead.
+3. **The consent screen could not be published** because a sensitive-scope app needs a privacy-policy URL and the Worker served none.
 
-### やったこと
+### Changes
 
-**(A) `/privacy` ルート追加**([auth/handler.ts](../src/auth/handler.ts))
+**(A) `/privacy` route** ([auth/handler.ts](../src/auth/handler.ts)) — a single-user policy (read-only, no third-party sharing, only the refresh token stored in KV, Google API Services User Data Policy Limited Use statement), served at `GET /privacy` and linked from the landing page. The contact address is an optional `PRIVACY_CONTACT` env var so no personal address is committed; the line is omitted when it is unset.
 
-同意画面を publish できるようにするため、Worker が単一利用者向けのプライバシーポリシー(read-only、第三者共有なし、KV に保存するのは refresh token のみ、Google API Services User Data Policy の Limited Use 準拠文)を `GET /privacy` で配信。ランディングからもリンク。→ 同意画面 Branding に home page + privacy URL を入れて production 化できる状態に。
+**(B) End-to-end check via the Claude Code connector** — re-authorized through `/mcp`, then confirmed real data from the Google Health API across every tool family: `get_sleep` (stages/summary), `get_daily_metrics` (resting HR / HRV / SpO2 / skin temp = `daily-sleep-temperature-derivations`, absolute °C), `get_weight_range`. Multi-source data (Fitbit plus others via Health Connect) passes through.
 
-**(B) Claude Code 側 connector で実データ疎通確認**
+**(C) Two bug fixes**
 
-`/mcp` から再認可(Testing モードなので 7 日有効の新トークン)。全 tool ファミリで Google Health API から実データ取得を確認: `get_sleep`(stages/summary)、`get_daily_metrics`(resting HR / HRV / SpO2 / skin temp = `daily-sleep-temperature-derivations`、絶対 ℃)、`get_weight_range`(Health Connect 経由の外部アプリ)。複数のデータソースも透過して返る。
-
-**(C) バグ 2 件修正**
-
-| バグ | 原因 | 修正 |
+| Bug | Cause | Fix |
 |---|---|---|
-| `get_sleep_range` が 7 日で 69,560 字 → MCP クライアントのトークン上限超過でファイル退避(ChatGPT でも詰まる) | 生 datapoint(全 stage 遷移 + 全 micro-awakening)を `JSON.stringify(…, null, 2)` でそのまま返却。~10 KB/夜 | `summarizeSleepPoint()`([sleep.ts](../src/providers/google-health/sleep.ts)): 夜ごとに日付/滞在時間/効率 %/stage 分/覚醒回数だけのサマリに圧縮。7 日で ~3 KB。1 夜の stage 詳細は従来どおり `get_sleep` |
-| `get_heart_rate` が `sampleCount: 2000` 固定・22〜23 時のみを返し、min/max/avg を全日値として提示 | `dataPoints.list` の AIP デフォルト pageSize=50(未指定時)+ 40 ページ cap で、~2.5 秒サンプリングの HR が 1 日の末尾 2 時間で打ち止め | [client.ts](../src/providers/google-health/client.ts) に `pageSize`(既定 1000 = GH API の最大)を明示追加。`listAllDataPointsPaged` / `getSampleRangePaged` で truncation を通知。[heart-rate.ts](../src/providers/google-health/heart-rate.ts) は pageSize 1000 × 45 ページに。取得は 1 日分フル(以前は末尾約 2 時間で打ち止め、min/max/avg が全日値として誤提示されていた)。上限超過時のみ `partialCoverage: true` |
+| `get_sleep_range` returned ~70 KB for 7 days and overflowed the MCP client's token limit (would choke ChatGPT too) | Raw data points — every stage transition and micro-awakening — serialized with `JSON.stringify(…, null, 2)`, ~10 KB/night | `summarizeSleepPoint()` ([sleep.ts](../src/providers/google-health/sleep.ts)): one summary per night (date, time in bed, efficiency %, stage minutes, awakening count), ~3 KB for a week. Full per-night stage detail still available via `get_sleep`. |
+| `get_heart_rate` returned exactly `sampleCount: 2000` covering only ~2 hours, while reporting min/max/avg as whole-day figures | `dataPoints.list` defaults to `pageSize` 50 (AIP-158) and the 40-page cap ran out; continuous HR is sampled every ~2.5 s | Set `pageSize` explicitly ([client.ts](../src/providers/google-health/client.ts), default 1000 = API max); added `listAllDataPointsPaged` / `getSampleRangePaged` that report truncation; `get_heart_rate` now fetches 1000 × 45 pages — full 24 h (~36k samples), with `partialCoverage: true` only if that cap is hit. |
 
-`pageSize` 明示は `get_weight_range` / `get_body_fat_range` / `get_daily_metrics` にも波及(長期間レンジの取りこぼし防止)。
+Explicit `pageSize` also helps `get_weight_range` / `get_body_fat_range` / `get_daily_metrics` on long ranges.
 
-### 検証
+### Verification
 
-- `tsc --noEmit` green
-- デプロイ後、Claude Code connector 経由で `get_sleep_range`(7 日 → 7 サマリ ~3 KB)と `get_heart_rate`(24 時間フル)を再取得して確認
-- `npm run lint`(Biome)は repo 全体で赤だが、これは本変更前から(HEAD の全ファイルで `×`)。CRLF と既存フォーマット由来。既存スタイルに追従し、`npm run format` は別コミット扱いとする
+- `tsc --noEmit` clean.
+- After deploy, re-fetched `get_sleep_range` (7 days → 7 summaries, ~3 KB) and `get_heart_rate` (full 24 h) through the connector.
+- `npm run lint` (Biome) is red repo-wide, but it was already red before this change (every file fails at HEAD) — CRLF and pre-existing formatting. Matched the existing style; a `npm run format` pass is left as a separate commit.
 
-### 残タスク(ユーザー側)
+### Resolution (same day)
 
-1. Google 同意画面に home page + `…/privacy` を登録 → **App を publish(In production)** で 7 日失効を解消
-2. ChatGPT で connector を一度削除 → 再追加(Google consent やり直し)
+- **Consent screen published to "In production."** For a single user it stays unverified (100-user cap, an "unverified app" warning on first consent), but the key effect is that refresh tokens no longer expire after 7 days.
+- **Re-authorized the connector** so the stored token is a production one. Re-ran the full tool suite — `get_sleep`, `get_sleep_range`, `get_daily_metrics` (resting HR / HRV / SpO2 / skin temp), `get_heart_rate` — all return current data, including Fitbit + Polar (via Health Connect) as parallel sources.
+- Still open: remove and re-add the connector in **ChatGPT** so it picks up a production token (its stale token was the original trigger).
 
-### メモ
+### Repo hygiene
 
-- `get_sleep` / `get_heart_rate` の `date` は **UTC 暦日**として解釈される。UTC 以外のタイムゾーンの利用者では「その朝に終わった夜」を指すことになる。`get_sleep_range` のサマリは `interval.end_time + endUtcOffset` からローカル日付を出している
-- Tool count 変化なし(6 tool のまま、挙動のみ修正)
+Personal data had accumulated in `journal.md` / `research.md` over time (device model, merged-account probe results, exercise timestamps, a day's heart-rate figures, coarse timezone), plus a contact email in `handler.ts`. Redacted in a follow-up commit and scrubbed from history with `git filter-branch` + force-push, since the fork is public. The technical narrative is unchanged. This journal switches to English from this entry onward; earlier entries stay in the original Japanese.
+
+### Notes
+
+- `get_sleep` / `get_heart_rate` interpret `date` as a **UTC calendar day**; for a non-UTC user that means "the night that ended that morning". `get_sleep_range` summaries derive the local date from `interval.end_time + endUtcOffset`.
+- Tool count unchanged (still 6; behavior only).
