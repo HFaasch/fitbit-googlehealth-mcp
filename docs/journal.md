@@ -461,12 +461,17 @@ Explicit `pageSize` also helps `get_weight_range` / `get_body_fat_range` / `get_
 ### Resolution (same day)
 
 - **Consent screen published to "In production."** For a single user it stays unverified (100-user cap, an "unverified app" warning on first consent), but the key effect is that refresh tokens no longer expire after 7 days.
-- **Re-authorized the connector** so the stored token is a production one. Re-ran the full tool suite — `get_sleep`, `get_sleep_range`, `get_daily_metrics` (resting HR / HRV / SpO2 / skin temp), `get_heart_rate` — all return current data, including Fitbit + Polar (via Health Connect) as parallel sources.
-- Still open: remove and re-add the connector in **ChatGPT** so it picks up a production token (its stale token was the original trigger).
+- **Re-authorized the Claude Code connector** so the stored token is a production one. Re-ran the full tool suite — `get_sleep`, `get_sleep_range`, `get_daily_metrics` (resting HR / HRV / SpO2 / skin temp), `get_heart_rate` — all return current data, including Fitbit + Polar (via Health Connect) as parallel sources.
+- **ChatGPT connector removed and re-added.** It now holds a production token and works; this closes the loop on the original "tool has been disabled" report.
 
 ### Repo hygiene
 
-Personal data had accumulated in `journal.md` / `research.md` over time (device model, merged-account probe results, exercise timestamps, a day's heart-rate figures, coarse timezone), plus a contact email in `handler.ts`. Redacted in a follow-up commit and scrubbed from history with `git filter-branch` + force-push, since the fork is public. The technical narrative is unchanged. This journal switches to English from this entry onward; earlier entries stay in the original Japanese.
+- **Personal data redacted.** It had accumulated in `journal.md` / `research.md` over time (device model, merged-account probe results, exercise timestamps, a day's heart-rate figures, coarse timezone), plus a contact email in `handler.ts`. Redacted in a follow-up commit and scrubbed from history with `git filter-branch` + force-push, since the fork is public. The technical narrative is unchanged.
+- **README rewritten in English** for the current server — it still documented the old Fitbit implementation (16 read + 8 write tools, `log_meal_photo`, Fitbit Personal App). Now: the 6 read-only tools, the OAuth architecture, Google Cloud + consent-screen setup (with the 7-day Testing caveat), deploy, and connector wiring.
+- **`wrangler.toml.example` restored** (dropped in the Fitbit → Google Health rewrite) with the Google Health bindings, so a fork can `cp wrangler.toml.example wrangler.toml`.
+- **Branches collapsed.** All work had lived on `feature/google-health-oauth-chatgpt` while `main` still held the pre-migration Fitbit code. Fast-forwarded `main` to the feature tip and deleted the feature branch — the repo is now a single `main`.
+- This journal switches to English from this entry onward; earlier entries stay in the original Japanese.
+- The fork now reports "N commits ahead / M behind" of `tachibanayu24/…:main`. That divergence is intentional (different API, rewritten history) — do **not** "Sync fork".
 
 ### Notes
 
