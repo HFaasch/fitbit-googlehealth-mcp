@@ -7,7 +7,9 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get('/', (c) => c.html(landingPageHtml(new URL(c.req.url).origin)));
 
-app.get('/privacy', (c) => c.html(privacyPolicyHtml(new URL(c.req.url).origin)));
+app.get('/privacy', (c) =>
+  c.html(privacyPolicyHtml(new URL(c.req.url).origin, c.env.PRIVACY_CONTACT)),
+);
 
 app.get('/authorize', async (c) => {
   const authRequest = await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
@@ -104,7 +106,10 @@ function landingPageHtml(origin: string): string {
 </html>`;
 }
 
-function privacyPolicyHtml(origin: string): string {
+function privacyPolicyHtml(origin: string, contact?: string): string {
+  const contactLine = contact
+    ? `<br>\n  <strong>Contact:</strong> <a href="mailto:${contact}">${contact}</a>`
+    : '';
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -121,7 +126,7 @@ function privacyPolicyHtml(origin: string): string {
 <body>
   <h1>Privacy Policy</h1>
   <p><strong>Service:</strong> Google Health MCP Server (<code>${origin}</code>)<br>
-  <strong>Effective date:</strong> 2026-09-03</p>
+  <strong>Effective date:</strong> 2026-09-03${contactLine}</p>
 
   <p>This is a personal, single-user project. It exposes the operator's own Google Health
   data to an AI assistant (such as Claude or ChatGPT) through the Model Context Protocol
